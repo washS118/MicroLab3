@@ -2,3 +2,4 @@
 __vm/*
 *.sln
 *.vcxproj*
+Debug/*
