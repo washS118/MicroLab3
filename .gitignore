@@ -1,0 +1,4 @@
+.vs/*
+__vm/*
+*.sln
+*.vcxproj*
