@@ -32,6 +32,14 @@ void loop()
 
 }
 
-void menu(){
+void menu(){}
 
-}
+void record(){}
+
+void play(){}
+
+void stop(){}
+
+void printLCD(){}
+
+void clear(){}
