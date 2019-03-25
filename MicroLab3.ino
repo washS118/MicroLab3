@@ -12,14 +12,14 @@
 #include <Key.h>
 
 // Mode Defines
-#define IDLE 0
+#define idle 0
 #define RECORD 1
 #define PLAY 2
 
 // IO Pins
 #define FREQ 2
 #define IR A0
-#define LED A5
+#define LED 9
 #define BT_TX A1
 #define BT_RX A2
 #define LCD_SS 11
@@ -71,11 +71,24 @@ Keypad keypad = Keypad(makeKeymap(keys), KEY_ROWS, KEY_COLS, ROWS, COLS);
 #define COUNT 5
 const int cutoffs[] = { 500, 100, 10, 5, 0 };
 const int prescalers[] = { 1, 8, 64, 256, 1024 };
+bool toggle = HIGH;
 #define READ_PIN 2
 long avgFreq;
 float avgDuty;
 #define A_PIN A0
-#define TOGGLE_PIN 2
+
+//Playback-Record controls
+	bool record = false;
+	bool playback = false;
+	bool measuring = false;
+	int segment = 0;
+	bool  isPressed = FALSE;
+	int note = 0;
+	int stopTime = 0;
+	//Keypad Controlls
+	bool idle = false;
+	bool wasIdle = false;
+	int pressTime = 0;
 
 
 
@@ -121,10 +134,6 @@ void setup()
 	pinMode(A_PIN, INPUT);
 	initPWM();
 	setPWM(PWM_FREQ, (analogRead(A_PIN) / 1024.0) * 100);
-
-
-
-
 }
 
 // Add the main program code into the continuous loop() function
@@ -140,7 +149,7 @@ void loop()
 		else if (line.equals("clear")) clear();
 		else if (line.equals("stop")) mode = IDLE;
 		else if (line.equals("song")); // Print song segment
-		else if (line.equals("seg")); // Switch song segment
+		else if (line.equals("seg")) isPressed = !isPressed; // Switch song segment
 		else error();
 	}
 	
@@ -151,16 +160,38 @@ void loop()
 	case PLAY:
 		play();
 		break;
-	case IDLE:
+	case idle:
 
 		break;
 	default:
-		mode = IDLE;
+		mode = idle;
 	}
 }
 
 //Bullet 4
-void updateLED(){}
+void updateLED(){
+static long lastMilli = 0;
+
+readPWM();
+float pause = 1000 / ((float)avgFreq / 2000.0) / 2;
+Serial.println(pause);
+Bluetooth.println(pause);
+
+//Set led brightness
+setDuty((analogRead(A_PIN)/1024.0)*100);
+
+//Toggle the led state
+if(millis() - (lastMilli + pause) > 0 && toggle == HIGH)
+{
+	setPWM(PWM_FREQ, (analogRead(A_PIN)/1024.0)*100 );
+	lastMilli = millis();
+}
+if(millis() - (lastMilli + pause) > 0 && toggle == LOW){
+	TCCR1B &= 0xF8;
+	lastMilli = millis();
+}
+toggle = !toggle;
+}
 
 //Menu
 void help(){}
@@ -169,7 +200,78 @@ void help(){}
 void error(){}
 
 //Bullet 1
-void record(){}
+void record()
+{
+
+	//Swith Segment controls
+	static bool wasPressed = false;
+	//Switch song segment
+
+	if (wasPressed == true && isPressed == false) {
+		noTone(SPEAKER);
+		record = false;
+		note = 0;
+		segment++;
+		if (segment >= SEGMENTS) {
+			segment = 0;
+		}
+		Serial.print("Switching to segment ");
+		Serial.println(segment);
+	}
+	wasPressed = isPressed;
+	if (wasPressed == true && isPressed == true) isPressed = false;
+	
+	//Check device mode - record gets priority if conflict
+	char key = keypad.getKey();
+	wasIdle = idle;
+	idle = keypad.getState() == IDLE;
+	if (key == '*') {
+		Serial.println("Begin Recording");
+		initSeg(segment);
+		record = true;
+		note = 0;
+	}
+	
+	else if (record) {
+		if (wasIdle && !idle) { // Rising Edge
+			Serial.println(key);
+			key = key - ASCII0;
+			if (key >= 1 && key <= TONES) {
+				pressTime = millis();
+				song[segment][note].tone = key - 1;
+				tone(SPEAKER, tones[key - 1]);
+				measuring = true;
+			}
+		}
+		else if (!wasIdle && idle) { // Falling Edge
+			if (measuring) {
+				Serial.println("Falling Edge");
+				song[segment][note].duration = millis() - pressTime;
+				Serial.print("Saving note ");
+				Serial.print(note);
+				Serial.print(" as tone ");
+				Serial.print(song[segment][note].tone);
+				Serial.println(" and duration ");
+				Serial.print(song[segment][note].duration);
+				note++;
+				if (note >= NOTES) {
+					note = 0;
+					record = false;
+					printSegment(segment);
+				}
+				noTone(SPEAKER);
+				measuring = false;
+			}
+		}
+	}
+	
+	else { // Shut off speaker
+		if (millis() >= stopTime) {
+			note = 0;
+			noTone(SPEAKER);
+		}
+	}
+}
 
 //Bullet 2
 void play(){}
