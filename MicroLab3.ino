@@ -48,11 +48,13 @@ bool keyIdle = false;
 bool keyWasIdle = false;
 int pressTime = 0;
 char key;
+int keyCount = 0;
 #pragma endregion
 
 #pragma region Globals
 int mode;
 volatile int frequency;
+volatile float pause;
 SoftwareSerial bluetooth(BT_TX, BT_RX);
 Keypad keypad(makeKeymap(keys), KEY_ROWS, KEY_COLS, ROWS, COLS);
 #pragma endregion
@@ -113,6 +115,7 @@ void setup()
 	bluetooth.println("Starting Program");
 
 	lcdSPISetup();
+	str2LCD("Starting Program");
 
 	// IR-FuncGen Setup
 	pinMode(PWM_PIN, OUTPUT);
@@ -142,7 +145,10 @@ void loop()
 		else if (line.equals("seg")) isPressed = !isPressed; // Switch song segment
 		else error();
 	}
-
+    if (mode == MODE_IDLE){
+		clearScreen();
+		str2LCD("MAIN MENU");
+	}
 	key = keypad.getKey();
 
 	keyWasIdle = keyIdle;
@@ -199,20 +205,38 @@ void updateLED(){
 void help()
 {
 	Serial.println("HELP");
+	clearScreen();
+	str2LCD("HELP");
 }
 
 //Menu
 void error()
 {
 	bluetooth.println("ERROR: Invalid command");
+	clearScreen();
+	str2LCD("ERROR:");
+	setCursorPos(0x40);
+	str2LCD("Invalid command");
 }
 
 //Bullet 1
 void record()
 {
+	
 	//Serial.println("RECORDING");
+	clearScreen();
+	str2LCD("RECORDING");
+	setCursorPos(0x40);
 	if (keyWasIdle && !keyIdle) { // Rising Edge
 		Serial.println(key);
+		char2LCD(key);
+		keyCount++;
+		if(keyCount >=15){
+			clearScreen();
+			str2LCD("RECORDING");
+			setCursorPos(0x40);
+			keyCount = 0;
+		}
 		key = key - ASCII0;
 		if (key >= 1 && key <= TONES) {
 			pressTime = millis();
@@ -239,6 +263,8 @@ void record()
 				note = 0;
 				mode = MODE_IDLE;
 				Serial.println("DONE RECORDING");
+				clearScreen();
+				str2LCD("DONE RECORDING");
 			}
 			noTone(SPEAKER_PIN);
 			measuring = false;
@@ -250,21 +276,63 @@ void record()
 void play()
 {
 	Serial.println("PLAY");
+	clearScreen();
+	if(isPressed == false){
+		str2LCD("PLAYING SONG 1");
+	}
+	else if(isPressed == true){
+		str2LCD("PLAYING SONG 1");
+	}
+	
+	if (millis() >= stopTime) {
+		if (song[segment][note].duration == 0) {
+			mode = MODE_IDLE;
+		}
+		else {
+			Note n = song[segment][note];
+			int toneNum = n.tone;
+			Serial.println(toneNum);
+			Serial.println(tones[toneNum]);
+			// Plays note duration according to frequency input
+			tone(SPEAKER_PIN, tones[toneNum], (n.duration*2*pause/1000));
+			stopTime = millis() + (n.duration*2*pause/1000);
+			note++;
+			if (note >= NOTES) {
+				note = 0;
+				mode = MODE_IDLE;
+			}
+		}
+	}
+	// Shut off speaker
+	else if (millis() >= stopTime) {
+		note = 0;
+		noTone(SPEAKER_PIN);
+	}
 }
+
 
 //QOL
 void stop()
 {
 	Serial.println("STOP");
+	clearScreen();
+	str2LCD("STOP");
+	setCursorPos(0X40);
 	switch (mode) {
 	case MODE_RECORD:
 		bluetooth.println("Leaving record mode");
+		str2LCD("Leaving RECORD");
 		break;
 	case MODE_PLAY:
 		bluetooth.println("Leaving playback mode");
+		str2LCD("Leaving PLAYBACK");
 		break;
 	default:
 		bluetooth.println("Nothing to stop, returning to idle");
+		clearScreen();
+		str2LCD("Nothing to stop,");
+		setCursorPos(0X40);
+		str2LCD("Return to idle");
 	}
 
 	mode = MODE_IDLE;
