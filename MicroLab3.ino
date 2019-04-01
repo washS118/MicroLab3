@@ -54,9 +54,9 @@ int keyCount = 0;
 #pragma region Globals
 int mode;
 volatile int frequency;
-volatile float pause;
 SoftwareSerial bluetooth(BT_TX, BT_RX);
 Keypad keypad(makeKeymap(keys), KEY_ROWS, KEY_COLS, ROWS, COLS);
+float pause;
 #pragma endregion
 
 #pragma region Tone Vars
@@ -93,7 +93,8 @@ bool measuring = false;
 int segment = 0;
 bool  isPressed = false;
 int note = 0;
-int stopTime = 0;
+long stopTime = 0;
+bool metronome = true;
 #pragma endregion
 
 // The setup() function runs once each time the micro-controller starts
@@ -129,32 +130,30 @@ void setup()
 void loop()
 {
 	
-	updateLED();
+	if(metronome) updateLED();
 	
 	if (bluetooth.available()) {
 		String line = bluetooth.readString();
 		line.trim();
 		line.toLowerCase();
-		Serial.println(line);
+		bluetooth.println(line);
 		if (line.equals("record")) mode = MODE_RECORD;
 		else if (line.equals("play")) mode = MODE_PLAY;
 		else if (line.equals("help")) help();
 		else if (line.equals("clear")) clear();
 		else if (line.equals("stop")) stop();
 		else if (line.equals("song")) printSegment();
-		else if (line.equals("seg")) isPressed = !isPressed; // Switch song segment
+		else if (line.equals("seg")) switchSeg(); // Switch song segment
 		else error();
 	}
-    if (mode == MODE_IDLE){
-		clearScreen();
-		str2LCD("MAIN MENU");
-	}
+    
 	key = keypad.getKey();
 
 	keyWasIdle = keyIdle;
 	keyIdle = keypad.getState() == IDLE;
 
-	if (key == 'D') updateDuty(analogRead(IR_PIN));
+	if (key == 'D') updateDuty((analogRead(IR_PIN) / 1024.0) * 100);
+	if (key == '*') metronome = !metronome;
 	
 	switch (mode) {
 	case MODE_RECORD:
@@ -164,18 +163,26 @@ void loop()
 		play();
 		break;
 	case MODE_IDLE:
-		//Serial.println(frequency);
+		if (millis() >= stopTime) {
+			note = 0;
+			noTone(SPEAKER_PIN);
+		}
 		break;
 	default:
 		mode = MODE_IDLE;
 	}
 }
 
+void switchSeg() {
+	isPressed = !isPressed;
+	segment = segment == 0 ? 1 : 0;
+}
+
 //Bullet 4
 void updateLED(){
 	static long lastMilli = 0;
 
-	float pause = 1000 / ((float)frequency / 2000.0) / 2;
+	pause = 1000 / ((float)frequency / 2000.0) / 2;
 	
 
 	//Toggle the led state
@@ -275,39 +282,34 @@ void record()
 //Bullet 2
 void play()
 {
-	Serial.println("PLAY");
+	mode = MODE_PLAY;
 	clearScreen();
-	if(isPressed == false){
-		str2LCD("PLAYING SONG 1");
-	}
-	else if(isPressed == true){
-		str2LCD("PLAYING SONG 1");
-	}
+	str2LCD("PLAYING SONG 1");
 	
 	if (millis() >= stopTime) {
+		Serial.print("HERE");
 		if (song[segment][note].duration == 0) {
 			mode = MODE_IDLE;
+			bluetooth.println("DONE");
 		}
 		else {
 			Note n = song[segment][note];
+			int dur = metronome ? (n.duration / ((float)frequency / 2000.0) / 2) : n.duration;
+
 			int toneNum = n.tone;
 			Serial.println(toneNum);
 			Serial.println(tones[toneNum]);
 			// Plays note duration according to frequency input
-			tone(SPEAKER_PIN, tones[toneNum], (n.duration*2*pause/1000));
-			stopTime = millis() + (n.duration*2*pause/1000);
+			tone(SPEAKER_PIN, tones[toneNum], dur);
+			stopTime = millis() + dur;
 			note++;
 			if (note >= NOTES) {
 				note = 0;
 				mode = MODE_IDLE;
+				bluetooth.println("DONE");
 			}
 		}
-	}
-	// Shut off speaker
-	else if (millis() >= stopTime) {
-		note = 0;
-		noTone(SPEAKER_PIN);
-	}
+	}	
 }
 
 
@@ -339,10 +341,19 @@ void stop()
 }
 
 //Bullet 3 partial
-void printLCD(){}
+void printLCD()
+{
+	if (mode == MODE_IDLE) {
+		clearScreen();
+		str2LCD("MAIN MENU");
+	}
+}
 
 //Menu
-void clear(){}
+void clear()
+{
+	clearScreen();
+}
 
 void freqCalc(){
 	static unsigned long last = 0;
